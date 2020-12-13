@@ -1,0 +1,65 @@
+# подготовка: в консоли windows выполнить pip install wheel и затем pip install -U scikit-learn
+
+import pandas as pd
+col_names = ['x1', 'x2', 'x3', 'x4', 'y']
+df_train = pd.read_csv("C:/data/logit_train.csv", header=None, names=col_names)
+
+df_train.head()
+
+factor_cols = ['x1', 'x2', 'x3', 'x4']
+
+X_train = df_train[factor_cols]
+
+y_train = df_train.y
+
+from sklearn.linear_model import LogisticRegression
+
+model = LogisticRegression()
+
+model.fit(X_train, y_train)
+
+#матрица классификации:
+from sklearn import metrics
+cnf_matrix = metrics.confusion_matrix(y_train, y_train)
+print(cnf_matrix)
+
+print("Accuracy:",metrics.accuracy_score(y_train, y_train))
+#Процент верно классифицированных значений в обучающей выборке
+
+print("Precision:",metrics.precision_score(y_train, y_train))
+#Насколько часто модель оказывается права, когда делает новое предсказание
+
+print("Recall:",metrics.recall_score(y_train, y_train))
+#Насколько часто модель оказывается права только относительно значений "1"
+
+df_test = pd.read_csv("C:/data/logit_test.csv", header=None, names=col_names)
+
+X_test=df_test[factor_cols]
+
+y_test=df_test.y
+
+y_pred = model.predict(X_test)
+
+
+#Функция  predict_proba предоставляет постериорные вероятности, что У примет значение 1.
+#Функция predict выдает наиболее вероятную категорию для этой переменной (0 и 1). Иногда нужны просто эти категории, иногда нужно прояснить возможные неоднозначные наблюдения, для того, чтобы выяснить их наличие, случае следует вычислять постериорные вероятности. 
+
+#Округлить эти значения до 3 знаков:
+
+import numpy as np
+np.round(model.predict_proba(X_test)[:,1], decimals=3)
+
+#Если мы хотим записать данные вместо пустых значений в тестовой выборке:
+df_test.y = np.round(model.predict_proba(X_test)[:,1], decimals=3)
+
+#model evaluation
+import statsmodels.api as sm
+logit_model = sm.Logit(y_train, X_train)
+result = logit_model.fit()
+#должно появиться сообщение "optimization terminated successfully"
+print(result.summary())
+
+#теоретическая кривая регрессии
+import seaborn as sns
+probs = model.predict_proba(X_train)[:,1]
+sns.regplot(x=df_train.y, y=probs, data=df_train, logistic=True, x_jitter=.05)

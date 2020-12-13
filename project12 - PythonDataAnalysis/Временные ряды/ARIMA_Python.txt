@@ -1,0 +1,263 @@
+from statsmodels.tsa.stattools import adfuller
+import numpy as np
+from numpy import log
+
+series = pd.read_csv("C:/data/nasdaq_arima.csv")
+
+#Вначале необходимо установить стационарность ряда. Фондовый индекс сам по себе представляет нестационарный показатель, для которых применяется модель для разностей соседних уровней ряда: разности уже представляют собой стационарный ряд.
+#В статистике для проверки ряда динамики на стационарность применяется т.н. Дополненный тест Дики-Фуллера (ADF-тест)
+#Нулевая гипотеза в этом тесте "H0: ряд динамики нестационарный"
+
+series['close'].plot()
+plt.show()
+
+adf_test = adfuller(series.close.dropna())
+print('ADF-статистика: %f' % adf_test[0])
+print('p-значение: %f' % adf_test[1])
+
+#То есть ряд динамики нестационарный.
+#Теперь мы хотим выяснить, нужны ли нам разности и какого порядка.
+# 0 - для стационарных рядов (модель ARMA), 1 и 2 - для нестационарных рядов (модель ARIMA).
+
+
+# строим график автокорреляции:
+import matplotlib.pyplot as plt
+from pandas.plotting import autocorrelation_plot
+
+autocorrelation_plot(series)
+plt.show()
+
+#Автокорреляция ряда положительная для примерно 7-8 предыдущих наблюдений (т.е. с лагами от 1 до 7-8), значима для лага 3-4, и выше 0.5 для лага 3 и менее. 
+
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+
+fig, axes = plt.subplots(3, 2, sharex=True)
+axes[0, 0].plot(series.close); axes[0, 0].set_title('Исходный ряд')
+plot_acf(series.close, ax=axes[0, 1])
+axes[0,1].set_xlim(xmin=0, xmax=18)
+
+axes[1, 0].plot(series.close.diff()); axes[1, 0].set_title('1й порядок разностей')
+plot_acf(series.close.diff().dropna(), ax=axes[1, 1])
+axes[1,1].set_xlim(xmin=0, xmax=18)
+
+axes[2, 0].plot(series.close.diff().diff()); axes[2, 0].set_title('2й порядок разностей')pl
+plot_acf(series.close.diff().diff().dropna(), ax=axes[2, 1])
+axes[2,1].set_xlim(xmin=0, xmax=18)
+
+plt.show()
+
+#Построим разности на одном графическом поле:
+plot_acf(series.close.diff())
+plot_acf(series.close.diff.().diff())
+plt.show()
+
+#порядок дифференцирования определяется следующим образом: 
+# 0 - модель стационарная, включает долгосрочную компоненту (ненулевое долгосрочное среднее). Модель с 1-м порядком дифференцирования должна иметь константу и имеет постоянный средний тренд (случайное блуждание в одном направлении). Модель со 2-м порядком дифференцирования предполагает, что тренд меняется со временем (т.е., например, случайный тренд)
+#Для слишком высокого порядка разности модели (2) возникают признаки чрезмерного порядка, например, смена знака остатков от одного наблюдения к следующему. 
+#На графике автокорреляции регрессионных остатков при этом виден отрицательный пик примерно в 0,5 на лаге 1; также повышается стандартное отклонение модели.
+#возьмем одну несезонную разность.
+# потом при подгонке модели может обнаружиться, что добавление еще одного порядка разности снимает некоторые проблемы.
+
+#PACF - partial autocorrelation, between time series and its lag, after excluding intermediate lags
+#график автокорреляции порядка дифференцирования 1
+#Этот график также проясняет, сколько параметров авторегрессии взять в модель.
+#Консервативно - берем 5. Менее консервативно - 9-11. Очень консервативно - начинаем с 1.
+
+plot_pacf(series.close.diff().dropna())
+plt.show()
+plot_pacf(series.close.diff().diff().dropna())
+plt.show()
+
+#ACF - автокорреляция самого ряда. Этот график проясняет, сколько параметров скользящей средней целесообразно включить в модель.
+#Строим график
+
+plt.rcParams.update({'figure.figsize':(9,3), 'figure.dpi':120})
+fig, axes = plt.subplots(1, 2, sharex=True)
+axes[0].plot(series.close.diff()); axes[0].set_title('1й порядок разностей')
+axes[1].set(ylim=(0,1.2))
+plot_acf(df.value.diff().dropna(), ax=axes[1])
+
+#или просто plot_acf(df.value.diff().dropna())
+
+plt.show()
+
+#По-видимому, также 5-7.
+
+#Что, если в модели чрезмерный (или недостаточный) порядок разности?
+#- если текущий порядок немного слишком большой, добавить один параметр МА.
+#- если текущий порядок немного недостаточен, добавить один параметр AR.
+
+#В моделях ARMA/ARIMA порядок модели указывается в терминах параметров p,d,q,
+где p - количество параметров авторегрессии (определяемое частной автокорреляцией ряда с его регрессионными остатками), d - порядок разностей, q - количество параметров скользящей средней, определяемое автокорреляцией самого ряда).
+
+# Мы можем применить также следующую методику построения таких моделей: сначала строится модель с порядком 1,х,1 (вне зависимости от того, каков порядок разностей), затем число параметров авторегрессии повышается до наилучшей подгонки под "естественное" движение ряда, и затем _строго по одному_ повышается количество параметров скользящего среднего для "доводки" модели.
+# При этом в какой-то момент возникнет ситуация, когда добавление в модель еще одного параметра авторегрессии не дает видимого изменения качества модели на графике. Следует руководствоваться общей рекомендацией, что модель с меньшим количеством параметров лучше, при приблизительно одинаковом результате.
+# Для большинства процессов количество параметров авторегрессии и скользящего среднего приблизительно одинаковое. Следует также помнить, что чистые процессы авторегрессии (вида p,x,0) , как и чистые процессы скользящего среднего (вида 0,x,q) встречаются крайне редко.
+# Например, построим модель Арима с порядком 1,1,2
+# порядок = число параметров AR, порядок разностей, число параметров MA.
+
+from statsmodels.tsa.arima.model import ARIMA
+
+model = ARIMA(series.close, order=(1,1,2))
+
+print(model.fit().summary())
+
+#коэффициенты AR и оба МА незначимы. Попробуем перестроить модель без МА2 или взять больше коэффициентов.
+
+model = ARIMA(series.close, order=(1,1,1))
+print(model.fit().summary())
+
+model_fit = model.fit()
+
+#Построим график регрессионных остатков, чтобы убедиться, что в них отсутствуют закономерности (т.е. смотрим, что средняя и дисперсия постоянна):
+residuals = pd.DataFrame(model_fit.resid)
+fig, ax = plt.subplots(1,2)
+residuals.plot(title="Остатки", ax=ax[0])
+residuals.plot(kind='kde', title='Density', ax=ax[1])
+plt.show()
+
+#также
+
+model_fit.plot_diagnostics()
+
+#Левый верхний график - регрессионные остатки. Должны иметь приблизительно одинаковую дисперсию и колебаться относительно среднего значения, равного 0.
+#Правый верхний график - предполагает плотность нормального распределения со средним 0.
+#Левый нижний график - все точки должны совпадать с красной линией. #Значимые отклонения предполагают, что распределение имеет асимметрию (т.е. помимо случайности содержит структуру)
+#правый нижний график - коррелограмма, показывает автокорреляцию в регрессионных остатках. Автокорреляция в остатках означает, что они содержат определенную закономерность, которая не попала в модель.
+
+
+#Для дальнейшей оценки модели проведем кросс-валидацию, которая предполагает сокращение ряда динамики на N шагов с последнего значения, а затем построение прогноза на N шагов вперед, с проверкой соответствия фактическим известным данным. 
+
+#Другими словами, ряд динамики делится на две последовательные части, обучающую и тестовую, приблизительно в соотношении 75:25 (или другом разумном соотношении в зависимости от исходного объема данных).
+
+train = series.close[:36]
+test = series.close[36:]
+
+model = ARIMA(train, order=(1,2,1))
+fit = model.fit()
+
+forecast_values = fit.get_forecast(steps=14, alpha=0.05) #95% доверительный интервал
+
+forecast_conf = forecast_values.conf_int()
+ax = train.plot()
+forecast_values.predicted_mean.plot(ax = ax, label = 'Forecasts')
+test.plot(ax = ax, label = 'Test')
+ax.fill_between(forecast_conf.index, forecast_conf.iloc[:, 0], forecast_conf.iloc[:, 1], color='k', alpha=.10) #закрашиваем доверительный интервал серым цветом
+
+plt.title('Прогноз vs Фактический')
+plt.legend(loc='lower right', fontsize=8)
+plt.show()
+
+# Прогноз находится ниже фактических значений, хотя модель верно "определяет" дальнейшее направление в целом. То есть добавление некоей константы, или дополнение тренда, к нашему прогнозу, должно привести к его улучшению.
+#Оставляем порядок разности 2, и последовательно поднимем p до 6 и затем q до 4, и пронаблюдаем, какая модель дает наиболее низкий критерий информативности Акаике (AIC) и дает наилучшее приближение прогнозных значений к фактическим.
+# (ПРИМЕЧАНИЕ: AIC, оценка выборочной ошибки прогнозирования, характеризует, насколько хорошо модель подходит для данных в отсутствие чрезмерной подгонки. Используется для сравнения нескольких моделей)
+# В то же время необходимо отслеживать p-значения для коэффициентов AR и MA в модели, которые должны быть как можно ближе к 0.
+
+train = series.close[:36]
+test = series.close[36:]
+model = ARIMA(train, order=(6,2,4))
+fit = model.fit()
+forecast_values = fit.get_forecast(steps=14, alpha=0.05)
+forecast_conf = forecast_values.conf_int()
+ax = train.plot()
+forecast_values.predicted_mean.plot(ax = ax, label = 'Forecasts')
+test.plot(ax = ax, label = 'Test')
+ax.fill_between(forecast_conf.index, forecast_conf.iloc[:, 0], forecast_conf.iloc[:, 1], color='k', alpha=.10)
+plt.title('Прогноз vs Фактический')
+plt.legend(loc='lower right', fontsize=8)
+plt.show()
+
+#Для проверки модели целесообразно также менять количество дней, на которые строится кросс-валидационный прогноз. 
+
+# Теперь строим модель с наилучшим порядком для прогнозирования фактических данных
+
+model = ARIMA(series.close, order=(6,2,4))
+fit = model.fit()
+
+# И затем получаем прогноз:
+
+forecast_values = fit.get_forecast(steps=10, alpha=0.05)
+forecast_conf = forecast_values.conf_int()
+ax = series.plot()
+forecast_values.predicted_mean.plot(ax = ax, label = 'Прогноз')
+ax.fill_between(forecast_conf.index, forecast_conf.iloc[:, 0], forecast_conf.iloc[:, 1], color='k', alpha=.10)
+plt.title('Прогноз NASDAQ')
+plt.legend(loc='lower right', fontsize=8)
+plt.show()
+
+#Автоматическое построение модели:
+
+from statsmodels.tsa.arima_model import ARIMA
+import pmdarima as pm
+
+df = pd.read_csv('C:/data/series.csv')
+
+model = pm.auto_arima(df.close, start_p=1, start_q=1,
+                      test='adf',       # use adftest to find optimal 'd'
+                      max_p=3, max_q=3, # maximum p and q
+                      m=1,              # frequency of series
+                      d=None,           # let model determine 'd'
+                      seasonal=False,   # No Seasonality
+                      start_P=0, 
+                      D=0, 
+                      trace=True,
+                      error_action='ignore',  
+                      suppress_warnings=True, 
+                      stepwise=True)
+
+print(model.summary())
+
+# прогнозирование
+n_periods = 24
+fc, confint = model.predict(n_periods=n_periods, return_conf_int=True)
+index_of_fc = np.arange(len(df.close), len(df.close)+n_periods)
+
+# строим ряд для прогноза
+fc_series = pd.Series(fc, index=index_of_fc)
+lower_series = pd.Series(confint[:, 0], index=index_of_fc)
+upper_series = pd.Series(confint[:, 1], index=index_of_fc)
+
+# график
+plt.plot(df.close)
+plt.plot(fc_series, color='darkgreen')
+plt.fill_between(lower_series.index, 
+                 lower_series, 
+                 upper_series, 
+                 color='k', alpha=.15)
+
+plt.title("Auto-ARIMA Forecast")
+plt.show()
+
+# отметим, однако, что прогноз по автоматическим моделям, хотя и укладывается в доверительный интервал, относительно "неинтересный".
+
+# метрики для моделей:
+def forecast_accuracy(forecast, actual):
+    mape = np.mean(np.abs(forecast - actual)/np.abs(actual))  # MAPE
+    me = np.mean(forecast - actual)             # ME
+    mae = np.mean(np.abs(forecast - actual))    # MAE
+    mpe = np.mean((forecast - actual)/actual)   # MPE
+    rmse = np.mean((forecast - actual)**2)**.5  # RMSE
+    corr = np.corrcoef(forecast, actual)[0,1]   # corr
+    mins = np.amin(np.hstack([forecast[:,None], 
+                              actual[:,None]]), axis=1)
+    maxs = np.amax(np.hstack([forecast[:,None], 
+                              actual[:,None]]), axis=1)
+    minmax = 1 - np.mean(mins/maxs)             # minmax
+    acf1 = acf(fc-test)[1]                      # ACF1
+    return({'mape':mape, 'me':me, 'mae': mae, 
+            'mpe': mpe, 'rmse':rmse, 'acf1':acf1, 
+            'corr':corr, 'minmax':minmax})
+
+forecast_accuracy(fc, test.values)
+
+#пояснения:
+#MAPE - средний абсолютный процент ошибок
+#ME - средняя ошибка прогнозирования
+#MAE - средняя абсолютная ошибка
+#MPE - средний процент ошибок
+#RMSE - средняя ошибка канонической характеристики Root
+#ACF - автокорреляция ошибок с лагом 1
+#corr - корреляция между фактическими и прогнозными значениями
+#minmax - минимальная и максимальная ошибка
+#прежде всего заслуживают внимания MAPE, corr и minmax.
+#остальные ошибки находятся в абсолютных единицах измерения и трудно поддаются подробной оценке, если только не знать масштаб исходных переменных.
