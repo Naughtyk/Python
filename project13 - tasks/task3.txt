@@ -1,0 +1,11 @@
+9 5 2
+Fantasy University
+Crazy University
+Fantasy University
+Fantasy University
+Very Good U
+Good U
+Very Good U
+Crazy University
+Good U
+1 1 2 3 2 1 1 2 2
